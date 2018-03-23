@@ -1291,15 +1291,8 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
 
                 if (maskedAction == AMOTION_EVENT_ACTION_DOWN
                         && (flags & InputWindowInfo::FLAG_WATCH_OUTSIDE_TOUCH)) {
-                    int32_t outsideTargetFlags = InputTarget::FLAG_DISPATCH_AS_OUTSIDE;
-                    if (isWindowObscuredAtPointLocked(windowHandle, x, y)) {
-                        outsideTargetFlags |= InputTarget::FLAG_WINDOW_IS_OBSCURED;
-                    } else if (isWindowObscuredLocked(windowHandle)) {
-                        outsideTargetFlags |= InputTarget::FLAG_WINDOW_IS_PARTIALLY_OBSCURED;
-                    }
-
                     mTempTouchState.addOrUpdateWindow(
-                            windowHandle, outsideTargetFlags, BitSet32(0));
+                            windowHandle, InputTarget::FLAG_DISPATCH_AS_OUTSIDE, BitSet32(0));
                 }
             }
         }
@@ -1876,6 +1869,11 @@ void InputDispatcher::pokeUserActivityLocked(const EventEntry* eventEntry) {
             & InputDispatcher::doPokeUserActivityLockedInterruptible);
     commandEntry->eventTime = eventEntry->eventTime;
     commandEntry->userActivityEventType = eventType;
+    if (eventType == USER_ACTIVITY_EVENT_BUTTON) {
+        const KeyEntry* keyEntry = static_cast<const KeyEntry*>(eventEntry);
+        commandEntry->keyEntry = const_cast<KeyEntry*>(keyEntry);
+        keyEntry->refCount += 1;
+    }
 }
 
 void InputDispatcher::prepareDispatchCycleLocked(nsecs_t currentTime,
@@ -3866,7 +3864,20 @@ bool InputDispatcher::afterMotionEventLockedInterruptible(const sp<Connection>& 
 void InputDispatcher::doPokeUserActivityLockedInterruptible(CommandEntry* commandEntry) {
     mLock.unlock();
 
-    mPolicy->pokeUserActivity(commandEntry->eventTime, commandEntry->userActivityEventType);
+    int32_t keyCode = AKEYCODE_UNKNOWN;
+
+    if (commandEntry->userActivityEventType == USER_ACTIVITY_EVENT_BUTTON &&
+            commandEntry->keyEntry) {
+        keyCode = commandEntry->keyEntry->keyCode;
+    }
+
+    mPolicy->pokeUserActivity(commandEntry->eventTime, commandEntry->userActivityEventType,
+            keyCode);
+
+    if (commandEntry->userActivityEventType == USER_ACTIVITY_EVENT_BUTTON &&
+            commandEntry->keyEntry) {
+        commandEntry->keyEntry->release();
+    }
 
     mLock.lock();
 }
